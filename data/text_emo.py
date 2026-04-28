@@ -5,14 +5,14 @@ from tqdm import tqdm
 from ollama import Client  # 使用 Client 类以便更精确地控制连接
 
 # 强制禁用所有代理干扰
-# os.environ['NO_PROXY'] = '127.0.0.1,localhost'
-# os.environ['no_proxy'] = '127.0.0.1,localhost'
+os.environ['NO_PROXY'] = '127.0.0.1,localhost'
+os.environ['no_proxy'] = '127.0.0.1,localhost'
 
 
 class SentimentRefiner:
     def __init__(self, model_name='llama3.2:3b'):
         # 显式指定 127.0.0.1 避开 localhost 解析可能导致的 502
-        # self.client = Client(host='http://127.0.0.1:11434')
+        self.client = Client(host='http://127.0.0.1:11434')
         self.model_name = model_name
         self.pos_emotions = ['joyful', 'happiness', 'joy', 'love', 'happy', 'positive']
         self.neg_emotions = ['fear', 'sad', 'angry', 'disgust', 'sadness', 'negative', 'fearful']
