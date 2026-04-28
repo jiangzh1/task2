@@ -4,137 +4,135 @@ from tqdm import tqdm
 from ollama import Client
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# 1. 环境变量：防止代理干扰
+# 环境变量：屏蔽代理
 os.environ['NO_PROXY'] = '127.0.0.1,localhost'
 os.environ['no_proxy'] = '127.0.0.1,localhost'
 
+# ================= 配置区 =================
+DEBUG_MODE = False  # True: 只运行前3条；False: 全量运行
+MODEL_NAME = 'llama3.2:1b'
+NUM_THREADS = 3 
+# ==========================================
 
 class SentimentRefiner:
-    def __init__(self, model_name='llama3.2:3b', num_threads=8):
-        # 连接到服务器本地的 Ollama
+    def __init__(self, model_name=MODEL_NAME, num_threads=NUM_THREADS):
         self.client = Client(host='http://127.0.0.1:11434')
         self.model_name = model_name
         self.num_threads = num_threads
+        
+        # 极性映射表
+        self.pos_labels = ['happy', 'joyful', 'love', 'happiness', 'positive']
+        self.neg_labels = ['sad', 'angry', 'fear', 'disgust', 'sadness', 'negative', 'fearful']
 
-        # 极性映射
-        self.pos_emotions = ['joyful', 'happiness', 'joy', 'love', 'happy', 'positive']
-        self.neg_emotions = ['fear', 'sad', 'angry', 'disgust', 'sadness', 'negative', 'fearful']
+    def get_polarity(self, label):
+        if not label: return "neu"
+        l = label.lower()
+        if any(x in l for x in self.pos_labels): return "pos"
+        if any(x in l for x in self.neg_labels): return "neg"
+        return "neu"
 
-    def get_llm_sentiment(self, text):
-        """调用 Ollama，极简指令模式"""
-        prompt = f"Categorize sentiment: '{text}'. Return ONLY 'pos', 'neg', or 'neu'."
+    def get_llm_text_sentiment(self, text):
+        """仅分析文本情感"""
+        prompt = f"""Analyze the sentiment of the text. Return ONLY one word from this list: [happy, sad, angry, fear, disgust, neutral].
+Text: "{text}"
+Label:"""
         try:
             response = self.client.generate(
                 model=self.model_name,
                 prompt=prompt,
-                options={
-                    "num_predict": 5,
-                    "temperature": 0
-                }
+                options={"num_predict": 5, "temperature": 0}
             )
-            result = response['response'].strip().lower()
-            if 'pos' in result: return 'pos'
-            if 'neg' in result: return 'neg'
-            if 'neu' in result: return 'neu'
-            return "ERROR_FORMAT"
-        except Exception as e:
-            print(f"\n[Error] Text: {text[:20]}... | Info: {e}")
+            result = response['response'].strip().lower().replace(".", "").replace("'", "")
+            allowed = ['happy', 'sad', 'angry', 'fear', 'disgust', 'neutral']
+            for word in allowed:
+                if word in result: return word
+            return "neutral"
+        except Exception:
             return "ERROR_LLM"
 
-    def get_sticker_polarity(self, sticker_emo):
-        if not sticker_emo: return "neu"
-        emo = sticker_emo.lower()
-        if any(e in emo for e in self.pos_emotions): return "pos"
-        if any(e in emo for e in self.neg_emotions): return "neg"
-        return "neu"
-
-    def process_session(self, line):
-        """处理单条 Session（JSONL 的一行）"""
+    def process_session(self, line, pbar):
         try:
             data = json.loads(line)
-            # data = data[0:2]
-            for turn in data['dialogue']:
-                # 初始状态设为 -1
-                turn['is_conflict'] = -1
-
-                # 获取 LLM 判定结果
-                text_sent = self.get_llm_sentiment(turn['text'])
+            
+            # 记录最后一条有表情包的轮次索引，用于更新顶层 is_session_conflict
+            last_sticker_turn_idx = -1
+            
+            for i, turn in enumerate(data['dialogue']):
+                # 1. 无论有没有表情包，文本情感总是要识别的
+                text_sent = self.get_llm_text_sentiment(turn['text'])
                 turn['text_sentiment'] = text_sent
-
-                # --- 修复后的判断逻辑 ---
-                if "ERROR" not in text_sent:
-                    if turn.get('sticker_path'):
-                        s_polar = self.get_sticker_polarity(turn.get('emotion_label', ''))
-                        t_polar = text_sent
-
-                        # 冲突：两个极性明确且相反
+                
+                # 2. 处理表情包相关的字段
+                if turn.get('sticker_path'):
+                    # 命名修正：改回具体的 sticker_emotion
+                    # 这里的 emotion_label 是你清理脚本里从原始数据提取的 origin_anno
+                    s_emo_gt = turn.get('emotion_label', 'neutral') 
+                    turn['sticker_emotion'] = s_emo_gt
+                    
+                    # 判定冲突
+                    if "ERROR" not in text_sent:
+                        t_polar = self.get_polarity(text_sent)
+                        s_polar = self.get_polarity(s_emo_gt)
                         if t_polar != "neu" and s_polar != "neu" and t_polar != s_polar:
                             turn['is_conflict'] = 1
                         else:
                             turn['is_conflict'] = 0
                     else:
-                        # 纯文本不参与音文冲突判定
-                        turn['is_conflict'] = 0
+                        turn['is_conflict'] = -2 # 代表 LLM 出错
+                    
+                    last_sticker_turn_idx = i
                 else:
-                    # 如果报错，is_conflict 保持 -1
-                    pass
+                    # 【核心修正】没有表情包的轮次
+                    turn['sticker_emotion'] = None
+                    turn['is_conflict'] = -1 # 统一置为 -1，表示不适用
+                
+                # 清理掉之前可能存在的歧义字段（如果有的话）
+                if 'emotion_label' in turn:
+                    del turn['emotion_label']
+                
+                pbar.update(1)
 
-            # 更新 Session 顶层冲突标志
-            final_conflict = 0
-            last_turn_with_sticker = None
-            for turn in reversed(data['dialogue']):
-                if turn.get('sticker_path'):
-                    last_turn_with_sticker = turn
-                    break
-
-            if last_turn_with_sticker:
-                final_conflict = last_turn_with_sticker['is_conflict']
-
-            data['is_session_conflict'] = final_conflict
+            # 3. 更新顶层 Session 标志
+            # 必须基于真正带有表情包的最后一轮
+            if last_sticker_turn_idx != -1:
+                data['is_session_conflict'] = data['dialogue'][last_sticker_turn_idx]['is_conflict']
+            else:
+                data['is_session_conflict'] = -1
+            
             return json.dumps(data, ensure_ascii=False)
         except Exception:
             return None
 
     def refine_file(self, input_file, output_file):
-        if not os.path.exists(input_file):
-            print(f"Error: {input_file} not found.")
-            return
-
-        print(f"🚀 Processing {input_file} (Threads: {self.num_threads})")
-
+        if not os.path.exists(input_file): return
         with open(input_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
+        if DEBUG_MODE:
+            print(f"⚠️ DEBUG MODE: Only processing 3 sessions.")
+            lines = lines[:3]
+
+        total_turns = sum(len(json.loads(l)['dialogue']) for l in lines)
+        pbar = tqdm(total=total_turns, desc="Processing Turns")
+        
         results = []
         with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
-            # 提交任务
-            future_to_index = {executor.submit(self.process_session, line): i for i, line in enumerate(lines)}
-
-            # 使用 tqdm 进度条
-            for future in tqdm(as_completed(future_to_index), total=len(lines), desc="Refining"):
+            futures = [executor.submit(self.process_session, line, pbar) for line in lines]
+            for future in as_completed(futures):
                 res = future.result()
-                if res:
-                    results.append(res)
+                if res: results.append(res)
+        pbar.close()
 
-        # 保存结果
         with open(output_file, 'w', encoding='utf-8') as f_out:
-            for r in results:
-                f_out.write(r + '\n')
-
-        print(f"✅ Saved refined data to: {output_file}")
-
+            for r in results: f_out.write(r + '\n')
+        print(f"✅ Refinement finished: {output_file}")
 
 if __name__ == "__main__":
-    # 请根据显存大小调整 num_threads
-    # 8GB 显存建议 4-6, 24GB 以上建议 10-15
-    refiner = SentimentRefiner(model_name='llama3.2:3b', num_threads=10)
-
-    # 任务列表
+    refiner = SentimentRefiner()
     tasks = [
-        # ('StickerConv_Cleaned_Test.jsonl', 'StickerConv_Refined_Test.jsonl'),
-        # ('StickerConv_Cleaned_Train.jsonl', 'StickerConv_Refined_Train.jsonl'),
-        ('StickerConv_Cleaned_Vail.jsonl', 'StickerConv_Refined_Vail.jsonl')
+        ('StickerConv_Cleaned_Vail.jsonl', 'StickerConv_Refined_Vail.jsonl'),
+        ('StickerConv_Cleaned_Test.jsonl', 'StickerConv_Refined_Test.jsonl'),
+        ('StickerConv_Cleaned_Train.jsonl', 'StickerConv_Refined_Train.jsonl')
     ]
-
     for in_f, out_f in tasks:
         refiner.refine_file(in_f, out_f)
