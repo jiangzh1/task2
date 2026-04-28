@@ -52,7 +52,7 @@ class SentimentRefiner:
         """处理单条 Session（JSONL 的一行）"""
         try:
             data = json.loads(line)
-            data = data[0:2]
+            # data = data[0:2]
             for turn in data['dialogue']:
                 # 初始状态设为 -1
                 turn['is_conflict'] = -1
