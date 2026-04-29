@@ -47,7 +47,8 @@ Label:"""
             for word in allowed:
                 if word in result: return word
             return "neutral"
-        except Exception:
+        except Exception as e:
+            print(f"\n[Error] | Info: {e}")
             return "ERROR_LLM"
 
     def process_session(self, line, pbar):
@@ -130,8 +131,8 @@ Label:"""
 if __name__ == "__main__":
     refiner = SentimentRefiner()
     tasks = [
-        ('StickerConv_Cleaned_Vail.jsonl', 'StickerConv_Refined_Vail.jsonl'),
-        ('StickerConv_Cleaned_Test.jsonl', 'StickerConv_Refined_Test.jsonl'),
+        # ('StickerConv_Cleaned_Vail.jsonl', 'StickerConv_Refined_Vail.jsonl'),
+        # ('StickerConv_Cleaned_Test.jsonl', 'StickerConv_Refined_Test.jsonl'),
         ('StickerConv_Cleaned_Train.jsonl', 'StickerConv_Refined_Train.jsonl')
     ]
     for in_f, out_f in tasks:
