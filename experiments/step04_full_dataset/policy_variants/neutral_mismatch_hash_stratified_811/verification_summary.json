@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "total_samples": 12930,
+  "split_counts": {
+    "train": 10344,
+    "validation": 1294,
+    "test": 1292
+  },
+  "sample_id_overlap": {
+    "train-validation": 0,
+    "train-test": 0,
+    "validation-test": 0
+  },
+  "image_path_overlap": {
+    "train-validation": 0,
+    "train-test": 0,
+    "validation-test": 0
+  },
+  "image_sha256_overlap": {
+    "train-validation": 0,
+    "train-test": 0,
+    "validation-test": 0
+  },
+  "nonzero_strata": 42,
+  "expected_strata": 42
+}

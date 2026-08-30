@@ -1,0 +1,105 @@
+{
+  "split_policy": "按目标表情包文件 SHA-256 分组；按官方七类情感×版本B二分类标签贪心分层",
+  "seed": 20260824,
+  "global_target": {
+    "train": 10344,
+    "validation": 1293,
+    "test": 1293
+  },
+  "actual_samples": {
+    "validation": 1294,
+    "test": 1292,
+    "train": 10344
+  },
+  "unique_image_paths": 3554,
+  "unique_image_hashes": 3465,
+  "duplicate_hash_groups": 76,
+  "cross_split_sha256_overlap": 0,
+  "moved_from_previous_split": 4429,
+  "strata": {
+    "Anger|Conflict": {
+      "total": 518,
+      "train": 414,
+      "validation": 52,
+      "test": 52
+    },
+    "Anger|Consistent": {
+      "total": 55,
+      "train": 44,
+      "validation": 6,
+      "test": 5
+    },
+    "Disgust|Conflict": {
+      "total": 20,
+      "train": 16,
+      "validation": 2,
+      "test": 2
+    },
+    "Disgust|Consistent": {
+      "total": 8,
+      "train": 6,
+      "validation": 1,
+      "test": 1
+    },
+    "Fear|Conflict": {
+      "total": 152,
+      "train": 122,
+      "validation": 15,
+      "test": 15
+    },
+    "Fear|Consistent": {
+      "total": 12,
+      "train": 10,
+      "validation": 1,
+      "test": 1
+    },
+    "Happiness|Conflict": {
+      "total": 668,
+      "train": 534,
+      "validation": 67,
+      "test": 67
+    },
+    "Happiness|Consistent": {
+      "total": 7888,
+      "train": 6310,
+      "validation": 789,
+      "test": 789
+    },
+    "Neutral|Conflict": {
+      "total": 1506,
+      "train": 1205,
+      "validation": 151,
+      "test": 150
+    },
+    "Neutral|Consistent": {
+      "total": 341,
+      "train": 273,
+      "validation": 34,
+      "test": 34
+    },
+    "Sadness|Conflict": {
+      "total": 1333,
+      "train": 1067,
+      "validation": 133,
+      "test": 133
+    },
+    "Sadness|Consistent": {
+      "total": 158,
+      "train": 126,
+      "validation": 16,
+      "test": 16
+    },
+    "Surprise|Conflict": {
+      "total": 73,
+      "train": 59,
+      "validation": 7,
+      "test": 7
+    },
+    "Surprise|Consistent": {
+      "total": 198,
+      "train": 158,
+      "validation": 20,
+      "test": 20
+    }
+  }
+}

@@ -1,0 +1,26 @@
+# Python and environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated experiment state and media
+artifacts/
+audio/
+outputs/
+model_cache/
+runtime/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Unrelated or oversized local data
+data/SER_Dataset/
+data/处理过程/
+data/*.parquet
+
+# Third-party upstream source retained only on the server for TTS execution
+experiments/step02_tts_pilot/code/
+experiments/step02_tts_pilot/assets/
