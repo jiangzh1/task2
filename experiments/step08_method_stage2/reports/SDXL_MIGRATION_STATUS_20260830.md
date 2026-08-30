@@ -10,8 +10,10 @@
 ## 已验证与待验证
 
 - 新增代码已通过 Python 语法编译和 Git 空白检查。
-- 当前服务器的默认 Python 与已发现 Conda Python 均没有 PyTorch，因此尚未运行张量级接口烟雾测试；未把此情况误记为通过。
-- 后续需要在专用 SDXL 环境中下载/定位 SDXL Base 1.0、`madebyollin/sdxl-vae-fp16-fix`（与 Latent-CLIP 配置一致）和 `wendlerc/latent-clip-b-4-512-plus-34b-80k`，再验证：SDXL U-Net 前向、Tweedie `z0` 到 `E_lat` 的梯度、DDIM 修正步以及 VAE latent 缓存形状和尺度。
+- 已复用既有 TTS 虚拟环境，在 CPU 上通过 SDXL 张量接口烟雾测试：512px latent 为 `[B,4,64,64]`，双文本交叉注意力为 `[B,77,2048]`，附加 `text_embeds` 与 `time_ids` 形状正确。
+- 已在 CPU 上通过既有端到端集成烟雾测试；原训练路径的预测形状、损失有限性及模块一、模块二、U-Net、CA-FM 梯度均正常。
+- SDXL Base、匹配 VAE 和官方 Latent-CLIP 权重已于 2026-08-31 启动后台下载到 `/data/jzh/2026/task2_sdxl_assets`，该目录不纳入 Git，也不占 GPU。
+- 下载完成后需要在 GPU 1 上验证：SDXL U-Net 前向、Tweedie `z0` 到 `E_lat` 的梯度、DDIM 修正步以及 VAE latent 缓存形状和尺度。
 
 ## 论文影响
 

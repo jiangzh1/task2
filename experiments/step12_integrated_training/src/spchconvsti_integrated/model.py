@@ -52,6 +52,7 @@ class SpchConvStiStageOne(nn.Module):
         timesteps: torch.Tensor,
         noise: torch.Tensor | None = None,
         base_encoder_hidden_states: torch.Tensor | None = None,
+        unet_kwargs: dict | None = None,
     ) -> TrainingStepOutput:
         if clean_latents.ndim != 4:
             raise ValueError("clean_latents 必须为 [B,C,H,W]")
@@ -71,6 +72,7 @@ class SpchConvStiStageOne(nn.Module):
             style=module2.emotion_quantized,
             conflict=module1.delta_modulated,
             base_encoder_hidden_states=base_encoder_hidden_states,
+            **(unet_kwargs or {}),
         )
         predicted_noise = prediction.sample if hasattr(prediction, "sample") else prediction[0]
         content_loss = diffusion_content_loss(predicted_noise, noise)
