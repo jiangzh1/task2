@@ -6,12 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import time
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-import torch
-import torchaudio.functional as AF
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -19,6 +18,13 @@ def connect(path: Path) -> sqlite3.Connection:
     db = sqlite3.connect(path)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("CREATE TABLE IF NOT EXISTS units (key TEXT PRIMARY KEY, payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', last_error TEXT)")
+    columns = {row[1] for row in db.execute("PRAGMA table_info(units)")}
+    if "lease_owner" not in columns:
+        db.execute("ALTER TABLE units ADD COLUMN lease_owner TEXT")
+    if "lease_started_at" not in columns:
+        db.execute("ALTER TABLE units ADD COLUMN lease_started_at REAL")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_units_claim ON units(status, attempts)")
+    db.commit()
     return db
 
 
@@ -32,6 +38,9 @@ def load_manifest(db: sqlite3.Connection, manifest: Path) -> None:
 
 
 def resample_file(source: Path, destination: Path) -> dict:
+    # 仅在确有新音频需要转码时才导入 PyTorch；领取/统计队列绝不触发 GPU 运行时。
+    import torch
+    import torchaudio.functional as AF
     audio, sr = sf.read(source, dtype="float32", always_2d=False)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
@@ -57,29 +66,51 @@ def reconcile(db: sqlite3.Connection, raw_dir: Path, segment_dir: Path) -> dict:
             resample_file(source, destination)
             converted += 1
     completed = {path.stem for path in segment_dir.glob("*.wav") if path.stat().st_size > 44}
-    db.executemany("UPDATE units SET status='succeeded',last_error=NULL WHERE key=?", ((key,) for key in completed))
+    db.executemany("UPDATE units SET status='succeeded',last_error=NULL,lease_owner=NULL,lease_started_at=NULL WHERE key=?", ((key,) for key in completed))
     db.commit()
     return {"newly_converted": converted, "completed_segments": len(completed)}
 
 
-def make_batch(db: sqlite3.Connection, output: Path, limit: int, max_attempts: int) -> int:
-    rows = db.execute(
-        "SELECT key,payload FROM units WHERE status!='succeeded' AND attempts<? ORDER BY rowid LIMIT ?",
-        (max_attempts, limit),
-    ).fetchall()
+def claim_batch(db: sqlite3.Connection, output: Path, limit: int, max_attempts: int, worker: str) -> int:
+    if not worker:
+        raise ValueError("worker 不能为空")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        rows = db.execute(
+            "SELECT key,payload FROM units WHERE status='pending' AND attempts<? ORDER BY rowid LIMIT ?",
+            (max_attempts, limit),
+        ).fetchall()
+        if rows:
+            db.executemany(
+                "UPDATE units SET status='leased',lease_owner=?,lease_started_at=? WHERE key=? AND status='pending'",
+                ((worker, time.time(), key) for key, _ in rows),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("".join(payload + "\n" for _, payload in rows), encoding="utf-8")
     return len(rows)
 
 
-def mark_missing_attempt(db: sqlite3.Connection, batch: Path, segment_dir: Path, message: str) -> None:
+def mark_missing_attempt(db: sqlite3.Connection, batch: Path, segment_dir: Path, message: str, worker: str) -> None:
     for line in batch.open(encoding="utf-8"):
         if not line.strip():
             continue
         key = json.loads(line)["key"]
         if not (segment_dir / f"{key}.wav").exists():
-            db.execute("UPDATE units SET attempts=attempts+1,status='pending',last_error=? WHERE key=?", (message, key))
+            db.execute("UPDATE units SET attempts=attempts+1,status='pending',last_error=?,lease_owner=NULL,lease_started_at=NULL WHERE key=? AND status='leased' AND lease_owner=?", (message, key, worker))
     db.commit()
+
+
+def release_worker(db: sqlite3.Connection, worker: str) -> int:
+    cursor = db.execute(
+        "UPDATE units SET status='pending',lease_owner=NULL,lease_started_at=NULL WHERE status='leased' AND lease_owner=?",
+        (worker,),
+    )
+    db.commit()
+    return cursor.rowcount
 
 
 def assemble(index_path: Path, segment_dir: Path, final_dir: Path, silence_ms: int) -> dict:
@@ -115,7 +146,8 @@ def assemble(index_path: Path, segment_dir: Path, final_dir: Path, silence_ms: i
 def summary(db: sqlite3.Connection, index_path: Path, final_dir: Path, max_attempts: int) -> dict:
     total_segments = db.execute("SELECT COUNT(*) FROM units").fetchone()[0]
     succeeded = db.execute("SELECT COUNT(*) FROM units WHERE status='succeeded'").fetchone()[0]
-    retryable = db.execute("SELECT COUNT(*) FROM units WHERE status!='succeeded' AND attempts<?", (max_attempts,)).fetchone()[0]
+    retryable = db.execute("SELECT COUNT(*) FROM units WHERE status='pending' AND attempts<?", (max_attempts,)).fetchone()[0]
+    leased = db.execute("SELECT COUNT(*) FROM units WHERE status='leased' AND attempts<?", (max_attempts,)).fetchone()[0]
     exhausted = db.execute("SELECT COUNT(*) FROM units WHERE status!='succeeded' AND attempts>=?", (max_attempts,)).fetchone()[0]
     total_samples = sum(1 for line in index_path.open(encoding="utf-8") if line.strip())
     completed_samples = sum(1 for _ in final_dir.glob("*/*.wav")) if final_dir.exists() else 0
@@ -123,6 +155,7 @@ def summary(db: sqlite3.Connection, index_path: Path, final_dir: Path, max_attem
         "total_segments": total_segments,
         "succeeded_segments": succeeded,
         "retryable_segments": retryable,
+        "leased_segments": leased,
         "exhausted_segments": exhausted,
         "total_samples": total_samples,
         "completed_samples": completed_samples,
@@ -131,7 +164,7 @@ def summary(db: sqlite3.Connection, index_path: Path, final_dir: Path, max_attem
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["init", "reconcile", "make-batch", "mark-missing", "assemble", "summary"])
+    parser.add_argument("command", choices=["init", "reconcile", "claim-batch", "mark-missing", "release-worker", "assemble", "summary"])
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--index", type=Path)
@@ -143,6 +176,7 @@ def main() -> int:
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--silence-ms", type=int, default=180)
     parser.add_argument("--message", default="模型未产出音频")
+    parser.add_argument("--worker")
     parser.add_argument("--status-json", type=Path)
     args = parser.parse_args()
     db = connect(args.db)
@@ -151,11 +185,13 @@ def main() -> int:
         result = {"initialized": db.execute("SELECT COUNT(*) FROM units").fetchone()[0]}
     elif args.command == "reconcile":
         result = reconcile(db, args.raw_dir, args.segment_dir)
-    elif args.command == "make-batch":
-        result = {"batch_size": make_batch(db, args.batch, args.limit, args.max_attempts)}
+    elif args.command == "claim-batch":
+        result = {"batch_size": claim_batch(db, args.batch, args.limit, args.max_attempts, args.worker or "")}
     elif args.command == "mark-missing":
-        mark_missing_attempt(db, args.batch, args.segment_dir, args.message)
+        mark_missing_attempt(db, args.batch, args.segment_dir, args.message, args.worker or "")
         result = {"marked": True}
+    elif args.command == "release-worker":
+        result = {"released": release_worker(db, args.worker or "")}
     elif args.command == "assemble":
         result = assemble(args.index, args.segment_dir, args.final_dir, args.silence_ms)
     else:
