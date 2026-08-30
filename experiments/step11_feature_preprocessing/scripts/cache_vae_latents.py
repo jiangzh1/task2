@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""将目标 sticker 确定性编码为 SD1.5 VAE latent，支持断点续跑。"""
+"""将目标 sticker 确定性编码为扩散模型 VAE latent，支持断点续跑。
+
+SDXL 工作分支默认使用 SDXL Base 的 VAE 及其配置中的 scaling_factor。
+"""
 
 from __future__ import annotations
 
@@ -35,18 +38,21 @@ def prepare_image(path: Path, size: int, resize_mode: str) -> torch.Tensor:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--model", required=True, help="本地 diffusers SD1.5 目录")
+    parser.add_argument("--model", required=True, help="本地 diffusers SDXL Base 目录")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=["fp32", "fp16", "bf16"], default="fp16")
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument("--resize-mode", choices=["pad", "center_crop"], default="pad")
-    parser.add_argument("--latent-scale", type=float, default=0.18215)
+    parser.add_argument("--latent-scale", type=float, default=None, help="默认读取 VAE config.scaling_factor")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     dtype = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[args.dtype]
     vae = AutoencoderKL.from_pretrained(args.model, subfolder="vae", torch_dtype=dtype).to(args.device).eval()
     vae.requires_grad_(False)
+    latent_scale = args.latent_scale if args.latent_scale is not None else getattr(vae.config, "scaling_factor", None)
+    if latent_scale is None:
+        raise ValueError("VAE 未声明 scaling_factor，请通过 --latent-scale 显式指定")
     completed = skipped = failed = 0
     failures = []
     for line in args.manifest.open(encoding="utf-8"):
@@ -59,7 +65,7 @@ def main() -> int:
             image = prepare_image(Path(row["image_path"]), args.image_size, args.resize_mode)
             with torch.inference_mode():
                 latent = vae.encode(image.unsqueeze(0).to(args.device, dtype=dtype)).latent_dist.mode()
-                latent = (latent * args.latent_scale).squeeze(0).cpu()
+                latent = (latent * latent_scale).squeeze(0).cpu()
             temporary = destination.with_suffix(".tmp.pt")
             torch.save({
                 "latent": latent,
@@ -67,7 +73,8 @@ def main() -> int:
                 "source_image": row["image_path"],
                 "image_size": args.image_size,
                 "resize_mode": args.resize_mode,
-                "latent_scale": args.latent_scale,
+                "latent_scale": latent_scale,
+                "vae_scaling_factor": getattr(vae.config, "scaling_factor", None),
             }, temporary)
             os.replace(temporary, destination)
             completed += 1
