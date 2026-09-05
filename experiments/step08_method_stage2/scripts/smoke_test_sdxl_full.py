@@ -9,18 +9,19 @@ import sys
 from pathlib import Path
 
 import torch
-from diffusers import StableDiffusionXLPipeline
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "step07_method_stage1/src"))
 sys.path.insert(0, str(ROOT / "step08_method_stage2/src"))
 from spchconvsti_diffusion.sdxl_conditions import build_empty_sdxl_conditions
+from spchconvsti_diffusion.sdxl_loader import load_sdxl_base
 from spchconvsti_diffusion.unet_adapter import ConflictAwareUNetAdapter
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--vae", type=Path, required=True)
     parser.add_argument("--device", default="cuda:1")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
@@ -28,7 +29,7 @@ def main() -> int:
     dtype = torch.float16
     torch.cuda.set_device(device)
     torch.cuda.reset_peak_memory_stats(device)
-    pipeline = StableDiffusionXLPipeline.from_pretrained(args.model, torch_dtype=dtype).to(device)
+    pipeline = load_sdxl_base(checkpoint_path=args.checkpoint, vae_path=args.vae, torch_dtype=dtype).to(device)
     pipeline.set_progress_bar_config(disable=True)
     pipeline.unet.eval().requires_grad_(False)
     adapter = ConflictAwareUNetAdapter(
