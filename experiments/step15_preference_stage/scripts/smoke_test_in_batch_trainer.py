@@ -7,7 +7,7 @@ import torch
 from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from spchconvsti_preference import InBatchPreferenceTrainer, StageTwoPreferenceObjective
+from spchconvsti_preference import InBatchPreferenceTrainer, StageTwoPreferenceObjective, TwoTowerProjectionHead
 
 
 class Scheduler:
@@ -21,13 +21,13 @@ class Condition(nn.Module):
 
 
 torch.manual_seed(7)
-b, d = 3, 8
+b, condition_dim, latent_dim = 3, 8, 10
 trainer = InBatchPreferenceTrainer(
-    Condition(), nn.Sequential(nn.Flatten(), nn.Linear(4, d)),
-    [nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, d)) for _ in range(3)],
+    Condition(), nn.Sequential(nn.Flatten(), nn.Linear(4, latent_dim)),
+    [TwoTowerProjectionHead(condition_dim, latent_dim, 6) for _ in range(3)],
     StageTwoPreferenceObjective(Scheduler(), margin=0.2), frozen_stage_one=[Condition()],
 )
-result = trainer({"condition": torch.randn(b, d)}, torch.randn(b, 1, 2, 2), torch.tensor([1, 2, 3]))
+result = trainer({"condition": torch.randn(b, condition_dim)}, torch.randn(b, 1, 2, 2), torch.tensor([1, 2, 3]))
 assert result["score_matrix"].shape == (b, b, 3)
 assert torch.isfinite(result["loss"])
 result["loss"].backward()

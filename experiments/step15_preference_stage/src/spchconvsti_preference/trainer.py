@@ -11,6 +11,27 @@ from torch.nn import functional as F
 from .stage_two import StageTwoPreferenceObjective, freeze_modules
 
 
+class TwoTowerProjectionHead(nn.Module):
+    """阶段二单个评分维度的条件/latent 双塔投影。
+
+    阶段一条件 ``h_joint`` 与 Latent-CLIP 视觉嵌入维度不同，二者各自经两层
+    GELU MLP 映射到同一评分空间，再计算余弦相似度。
+    """
+
+    def __init__(self, condition_dim: int, latent_dim: int, projection_dim: int) -> None:
+        super().__init__()
+        def tower(input_dim: int) -> nn.Sequential:
+            return nn.Sequential(nn.Linear(input_dim, projection_dim), nn.GELU(), nn.Linear(projection_dim, projection_dim))
+        self.condition = tower(condition_dim)
+        self.latent = tower(latent_dim)
+
+    def forward_condition(self, value: torch.Tensor) -> torch.Tensor:
+        return self.condition(value)
+
+    def forward_latent(self, value: torch.Tensor) -> torch.Tensor:
+        return self.latent(value)
+
+
 class InBatchPreferenceTrainer(nn.Module):
     """将论文第二阶段的冻结、加噪、三维评分和批内负样本连接起来。
 
@@ -44,8 +65,15 @@ class InBatchPreferenceTrainer(nn.Module):
             raise ValueError("condition 与 E_lat 输出必须为同一 batch 的二维张量")
         scores = []
         for head in self.projection_heads:
-            cond_projection = F.normalize(head(condition), dim=-1)
-            latent_projection = F.normalize(head(latent_features), dim=-1)
+            # 兼容旧的同维合成测试；正式 SDXL 训练使用 TwoTowerProjectionHead。
+            if isinstance(head, TwoTowerProjectionHead):
+                condition_value = head.forward_condition(condition)
+                latent_value = head.forward_latent(latent_features)
+            else:
+                condition_value = head(condition)
+                latent_value = head(latent_features)
+            cond_projection = F.normalize(condition_value, dim=-1)
+            latent_projection = F.normalize(latent_value, dim=-1)
             scores.append(cond_projection @ latent_projection.T)
         return torch.stack(scores, dim=-1)
 
