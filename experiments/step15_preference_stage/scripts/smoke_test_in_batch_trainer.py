@@ -17,17 +17,17 @@ class Scheduler:
 
 class Condition(nn.Module):
     def forward(self, batch):
-        return batch["condition"]
+        return batch["references"]
 
 
 torch.manual_seed(7)
-b, condition_dim, latent_dim = 3, 8, 10
+b, condition_dim, emotion_dim, latent_dim = 3, 8, 6, 10
 trainer = InBatchPreferenceTrainer(
     Condition(), nn.Sequential(nn.Flatten(), nn.Linear(4, latent_dim)),
-    [TwoTowerProjectionHead(condition_dim, latent_dim, 6) for _ in range(3)],
+    [TwoTowerProjectionHead(dim, latent_dim, 6) for dim in (condition_dim, emotion_dim, condition_dim)],
     StageTwoPreferenceObjective(Scheduler(), margin=0.2), frozen_stage_one=[Condition()],
 )
-result = trainer({"condition": torch.randn(b, condition_dim)}, torch.randn(b, 1, 2, 2), torch.tensor([1, 2, 3]))
+result = trainer({"references": {"sem": torch.randn(b, condition_dim), "emo": torch.randn(b, emotion_dim), "atm": torch.randn(b, condition_dim)}}, torch.randn(b, 1, 2, 2), torch.tensor([1, 2, 3]))
 assert result["score_matrix"].shape == (b, b, 3)
 assert torch.isfinite(result["loss"])
 result["loss"].backward()

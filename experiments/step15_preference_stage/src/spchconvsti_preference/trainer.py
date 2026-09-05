@@ -58,19 +58,22 @@ class InBatchPreferenceTrainer(nn.Module):
         self.objective = objective
         freeze_modules(frozen_stage_one)
 
-    def score_matrix(self, condition: torch.Tensor, noisy_latents: torch.Tensor) -> torch.Tensor:
+    def score_matrix(self, references: dict[str, torch.Tensor], noisy_latents: torch.Tensor) -> torch.Tensor:
         """返回 ``[B,B,3]``：行是条件样本，列是候选 sticker 样本。"""
         latent_features = self.latent_encoder(noisy_latents)
-        if condition.ndim != 2 or latent_features.ndim != 2 or condition.shape[0] != latent_features.shape[0]:
-            raise ValueError("condition 与 E_lat 输出必须为同一 batch 的二维张量")
+        keys = ("sem", "emo", "atm")
+        if tuple(references) != keys or any(references[key].ndim != 2 for key in keys):
+            raise ValueError("三维参考必须按 sem、emo、atm 提供二维张量")
+        if latent_features.ndim != 2 or any(references[key].shape[0] != latent_features.shape[0] for key in keys):
+            raise ValueError("三维参考与 E_lat 输出必须属于同一 batch")
         scores = []
-        for head in self.projection_heads:
+        for key, head in zip(keys, self.projection_heads):
             # 兼容旧的同维合成测试；正式 SDXL 训练使用 TwoTowerProjectionHead。
             if isinstance(head, TwoTowerProjectionHead):
-                condition_value = head.forward_condition(condition)
+                condition_value = head.forward_condition(references[key])
                 latent_value = head.forward_latent(latent_features)
             else:
-                condition_value = head(condition)
+                condition_value = head(references[key])
                 latent_value = head(latent_features)
             cond_projection = F.normalize(condition_value, dim=-1)
             latent_projection = F.normalize(latent_value, dim=-1)
@@ -80,8 +83,8 @@ class InBatchPreferenceTrainer(nn.Module):
     def forward(self, batch: dict[str, torch.Tensor], sticker_latents: torch.Tensor, timesteps: torch.Tensor) -> dict[str, torch.Tensor]:
         # 正样本就是本行 sticker；批内其它行均作为负样本，故只需对一个候选矩阵统一加噪。
         with torch.no_grad():
-            condition = self.condition_encoder(batch)
+            references = self.condition_encoder(batch)
         noisy = self.objective.noise_scheduler.add_noise(sticker_latents, torch.randn_like(sticker_latents), timesteps)
-        matrix = self.score_matrix(condition, noisy)
+        matrix = self.score_matrix(references, noisy)
         loss = self.objective.in_batch_negative_loss(matrix)
         return {"loss": loss, "score_matrix": matrix, "noisy_latents": noisy}

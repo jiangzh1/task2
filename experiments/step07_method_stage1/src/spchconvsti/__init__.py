@@ -2,7 +2,7 @@
 
 from .stage1 import Module1Output, SpeechTextConflictReasoner, bidirectional_info_nce
 from .stage2 import ConflictAwareConditioner, ConflictAwareFeatureModulation
-from .stage3 import MultiDimensionalLatentReward, constant_noise_trajectory_correction
+from .stage3 import MultiDimensionalLatentReward, StageTwoProjectionLatentReward, constant_noise_trajectory_correction
 
 __all__ = [
     "Module1Output",
@@ -11,5 +11,6 @@ __all__ = [
     "ConflictAwareConditioner",
     "ConflictAwareFeatureModulation",
     "MultiDimensionalLatentReward",
+    "StageTwoProjectionLatentReward",
     "constant_noise_trajectory_correction",
 ]

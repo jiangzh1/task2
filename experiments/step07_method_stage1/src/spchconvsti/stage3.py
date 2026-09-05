@@ -111,6 +111,31 @@ class MultiDimensionalLatentReward(nn.Module):
         return RewardOutput(visual, scores, weights, total)
 
 
+class StageTwoProjectionLatentReward(nn.Module):
+    """以阶段二训练完成的三组双塔头实现正文 3.3.1 的奖励。
+
+    三个参考严格为：上下文补全语义 ``y_bar_prime``、量化情感风格
+    ``e_q``、全局上下文 ``c_bar``。视觉侧始终由冻结的 ``E_lat`` 提取。
+    """
+
+    def __init__(self, latent_encoder: nn.Module, projection_heads: tuple[nn.Module, nn.Module, nn.Module]) -> None:
+        super().__init__()
+        self.latent_encoder = latent_encoder.requires_grad_(False)
+        self.projection_heads = nn.ModuleList(projection_heads)
+
+    def forward(self, estimated_z0, semantic_reference, emotion_reference, atmosphere_reference, timestep, total_steps):
+        visual = self.latent_encoder(estimated_z0)
+        references = (semantic_reference, emotion_reference, atmosphere_reference)
+        scores = []
+        for head, reference in zip(self.projection_heads, references):
+            if not hasattr(head, "forward_condition") or not hasattr(head, "forward_latent"):
+                raise TypeError("阶段三必须使用阶段二训练的双塔投影头")
+            scores.append(F.cosine_similarity(head.forward_latent(visual), head.forward_condition(reference), dim=-1))
+        scores = torch.stack(scores, dim=-1)
+        weights = dynamic_reward_weights(timestep, total_steps).to(scores.dtype)
+        return RewardOutput(visual, scores, weights, (weights * scores).sum(dim=-1))
+
+
 @dataclass
 class CorrectionOutput:
     corrected_latent: torch.Tensor
