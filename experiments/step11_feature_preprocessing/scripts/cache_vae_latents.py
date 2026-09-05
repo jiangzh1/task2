@@ -38,7 +38,8 @@ def prepare_image(path: Path, size: int, resize_mode: str) -> torch.Tensor:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--model", required=True, help="本地 diffusers SDXL Base 目录")
+    parser.add_argument("--model", type=Path, default=None, help="包含 vae 子目录的本地 diffusers 模型目录（兼容旧用法）")
+    parser.add_argument("--vae", type=Path, default=None, help="独立的 SDXL VAE 目录；与 --model 二选一")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=["fp32", "fp16", "bf16"], default="fp16")
@@ -48,7 +49,13 @@ def main() -> int:
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     dtype = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[args.dtype]
-    vae = AutoencoderKL.from_pretrained(args.model, subfolder="vae", torch_dtype=dtype).to(args.device).eval()
+    if (args.model is None) == (args.vae is None):
+        raise ValueError("必须且只能指定 --model 或 --vae")
+    vae_source = args.vae if args.vae is not None else args.model
+    vae_kwargs = {"torch_dtype": dtype, "local_files_only": True}
+    if args.vae is None:
+        vae_kwargs["subfolder"] = "vae"
+    vae = AutoencoderKL.from_pretrained(str(vae_source), **vae_kwargs).to(args.device).eval()
     vae.requires_grad_(False)
     latent_scale = args.latent_scale if args.latent_scale is not None else getattr(vae.config, "scaling_factor", None)
     if latent_scale is None:
