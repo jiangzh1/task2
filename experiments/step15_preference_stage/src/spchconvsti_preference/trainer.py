@@ -26,10 +26,10 @@ class TwoTowerProjectionHead(nn.Module):
         self.latent = tower(latent_dim)
 
     def forward_condition(self, value: torch.Tensor) -> torch.Tensor:
-        return self.condition(value)
+        return self.condition(value.to(dtype=next(self.condition.parameters()).dtype))
 
     def forward_latent(self, value: torch.Tensor) -> torch.Tensor:
-        return self.latent(value)
+        return self.latent(value.to(dtype=next(self.latent.parameters()).dtype))
 
 
 class InBatchPreferenceTrainer(nn.Module):
