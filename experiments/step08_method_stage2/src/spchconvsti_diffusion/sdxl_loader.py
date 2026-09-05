@@ -25,6 +25,14 @@ def load_sdxl_base(
     vae = AutoencoderKL.from_pretrained(
         str(vae_dir), torch_dtype=torch_dtype, local_files_only=True,
     )
+    # 已缓存的 Base 目录含有 UNet、双文本编码器与 tokenizer；优先用它组装，
+    # 以避免 diffusers 0.27 单文件加载器在离线模式额外查询 Hub 的 tokenizer。
+    model_dir = checkpoint.parent
+    if (model_dir / "model_index.json").is_file():
+        return StableDiffusionXLPipeline.from_pretrained(
+            str(model_dir), vae=vae, variant="fp16", torch_dtype=torch_dtype,
+            local_files_only=True, safety_checker=None, requires_safety_checker=False,
+        )
     return StableDiffusionXLPipeline.from_single_file(
         str(checkpoint), vae=vae, torch_dtype=torch_dtype,
         local_files_only=True, safety_checker=None, requires_safety_checker=False,

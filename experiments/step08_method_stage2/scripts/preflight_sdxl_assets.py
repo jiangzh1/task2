@@ -20,11 +20,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--vae", type=Path, required=True)
+    parser.add_argument("--device", default="cuda")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     pipeline = load_sdxl_base(
         checkpoint_path=args.checkpoint, vae_path=args.vae, torch_dtype=torch.float16,
-    )
+    ).to(args.device)
     checks = {
         "unet_cross_attention_dim": pipeline.unet.config.cross_attention_dim == 2048,
         "vae_scaling_factor": float(pipeline.vae.config.scaling_factor) > 0,
