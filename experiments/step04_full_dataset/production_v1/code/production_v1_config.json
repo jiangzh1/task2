@@ -1,0 +1,26 @@
+{
+  "version": "production_v1_20260921",
+  "model": "CosyVoice-300M-Instruct",
+  "speaker": "英文女",
+  "text_gate": {
+    "asr": "Whisper base",
+    "maximum_word_error_rate": 0.2,
+    "reject_repeated_5gram": true,
+    "maximum_attempts": 3
+  },
+  "other_unk_policy": {
+    "apply_only_after_text_gate": true,
+    "official_class_score_threshold": 0.3,
+    "if_above_threshold": "relabel to the highest official class and accept",
+    "otherwise": "retry; after three total attempts mark Other for manual review"
+  },
+  "prompts": {
+    "Happiness": "Happy: bright, warm, lively, light rhythm.",
+    "Sadness": "Sad: subdued, slow, heavy, low.",
+    "Anger": "Angry, indignant, controlled; emphatic key words, varied pace, falling stress.",
+    "Surprise": "Surprised: startled, high-pitched, animated.",
+    "Disgust": "Disgusted but controlled: clear aversion and recoil, clipped phrase groups, brief tense pauses, slight scoffing downward inflection on emphasized words. Never happy or angry.",
+    "Fear": "Fearful: panicked, breathless, trembling, urgent.",
+    "Neutral": "Neutral: matter-of-fact, even, natural."
+  }
+}
